@@ -9,6 +9,7 @@ from models import Session as SessionModel
 from datetime import datetime
 from database import engine, SessionLocal
 from models import Base, UserDB
+from websocket.routes import router as websocket_router
 
 
 # Create tables
@@ -235,3 +236,7 @@ def get_session(session_id: int, db: Session = Depends(get_db)):
         return {"error": "Session not found"}
 
     return session
+
+
+
+app.include_router(websocket_router)
