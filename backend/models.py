@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String,DateTime
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey
 from database import Base
 from datetime import datetime
 
@@ -32,3 +32,12 @@ class Session(Base):
     start_time = Column(DateTime, nullable=True)
     end_time = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class Invite(Base):
+    __tablename__ = "invites"
+
+    id = Column(Integer, primary_key=True, index=True)
+    sender_id = Column(Integer, ForeignKey("users.id"))
+    receiver_id = Column(Integer, ForeignKey("users.id"))
+    status = Column(String, default="pending")  # pending / accepted / rejected

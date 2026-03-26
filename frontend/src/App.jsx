@@ -1,106 +1,144 @@
-import { useEffect, useRef, useState } from "react";
-import Editor from "@monaco-editor/react";
+import React, { useState, useEffect, useRef } from "react";
+import axios from "axios";
+
+import Login from "./components/Login";
+import MentorDashboard from "./components/MentorDashboard";
+import StudentDashboard from "./components/StudentDashboard";
 
 function App() {
-  const socketRef = useRef(null);
+const socketRef = useRef(null);
 
-  const [message, setMessage] = useState("");
-  const [chat, setChat] = useState([]);
-  const [code, setCode] = useState("");
+// ✅ TOKEN STATE
+const [token, setToken] = useState(localStorage.getItem("token"));
 
-  useEffect(() => {
-    const ws = new WebSocket("ws://127.0.0.1:8000/ws/session/1");
+const [user, setUser] = useState(null);
+const [loading, setLoading] = useState(true);
 
-    ws.onopen = () => {
-      console.log("Connected to WebSocket");
-    };
+// 🔐 Decode Token
+useEffect(() => {
+if (!token) {
+setUser(null);
+setLoading(false);
+return;
+}
+try {
+  const decoded = JSON.parse(atob(token.split(".")[1]));
 
-    ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
+  console.log("🔥 TOKEN DATA:", decoded);
 
-      // 💬 Chat messages
-      if (data.type === "chat") {
-        setChat((prev) => [...prev, data.message]);
-      }
+  if (decoded?.user_id && decoded?.role) {
+    setUser(decoded);
+  } else {
+    throw new Error("Invalid token payload");
+  }
 
-      // 💻 Code editor sync
-      if (data.type === "editor") {
-        setCode(data.code);
-      }
-    };
+} catch (err) {
+  console.error("❌ Invalid token → clearing", err);
 
-    socketRef.current = ws;
+  localStorage.removeItem("token");
+  setToken(null);
+  setUser(null);
+}
 
-    return () => ws.close();
-  }, []);
+setLoading(false);
 
-  // 💬 Send chat
-  const sendMessage = () => {
-    if (!socketRef.current) return;
 
-    socketRef.current.send(
-      JSON.stringify({
-        type: "chat",
-        message: message,
-      })
-    );
+}, [token]);
 
-    setMessage("");
-  };
+// 🔌 WebSocket
+useEffect(() => {
+if (!user?.user_id) return;
 
-  // 💻 Send code
-  const sendCode = (value) => {
-    setCode(value);
+console.log("🔥 Connecting WS for:", user.user_id);
 
-    if (!socketRef.current) return;
+const ws = new WebSocket(
+  `ws://127.0.0.1:8000/ws/session/${user.user_id}`
+);
 
-    socketRef.current.send(
-      JSON.stringify({
-        type: "editor",
-        code: value,
-      })
-    );
-  };
+socketRef.current = ws;
 
-  return (
-    <div style={{ padding: 20 }}>
-      <h2>💬 MentorConnect Chat</h2>
+ws.onopen = () =>
+  console.log("✅ Connected to session", user.user_id);
 
-      {/* Chat Box */}
-      <div
-        style={{
-          border: "1px solid black",
-          height: 200,
-          overflowY: "scroll",
-          marginBottom: 10,
-          padding: 10,
-        }}
-      >
-        {chat.map((msg, index) => (
-          <p key={index}>{msg}</p>
-        ))}
-      </div>
+ws.onmessage = (event) => {
+  const data = JSON.parse(event.data);
 
-      {/* Chat Input */}
-      <input
-        value={message}
-        onChange={(e) => setMessage(e.target.value)}
-        placeholder="Type message"
-      />
+  if (data.type === "invite") {
+    alert(`📩 New invite from User ${data.sender_id}`);
+  }
+};
 
-      <button onClick={sendMessage}>Send</button>
+ws.onerror = (err) => {
+  console.error("❌ WebSocket error:", err);
+};
 
-      {/* Code Editor */}
-      <h2 style={{ marginTop: 20 }}>💻 Live Code Editor</h2>
+ws.onclose = () => {
+  console.log("🔌 Disconnected from session", user.user_id);
+};
 
-      <Editor
-        height="300px"
-        defaultLanguage="javascript"
-        value={code}
-        onChange={sendCode}
-      />
-    </div>
-  );
+return () => ws.close();
+
+
+}, [user?.user_id]);
+
+// ❌ END SESSION FUNCTION (NEW 🔥)
+const endSession = async () => {
+try {
+await axios.delete(
+`http://127.0.0.1:8000/session/end/${user.user_id}`
+);
+
+
+  // 🔌 Close WebSocket
+  if (socketRef.current) {
+    socketRef.current.close();
+  }
+
+  alert("❌ Session Ended");
+
+} catch (err) {
+  console.error("End session error:", err);
+}
+
+
+};
+
+// 🛑 Loading
+if (loading) {
+return <div style={{ color: "#fff" }}>Loading...</div>;
+}
+
+// 🔐 Not logged in
+if (!user) {
+return <Login setToken={setToken} />;
+}
+
+// 🎯 Role-based UI
+if (user.role === "mentor") {
+return (
+<MentorDashboard
+user={user}
+setToken={setToken}
+endSession={endSession} // 🔥 PASS THIS
+/>
+);
+}
+
+if (user.role === "student") {
+return (
+<StudentDashboard
+user={user}
+setToken={setToken}
+endSession={endSession} // 🔥 PASS THIS
+/>
+);
+}
+
+// fallback
+localStorage.removeItem("token");
+setToken(null);
+
+return <Login setToken={setToken} />;
 }
 
 export default App;

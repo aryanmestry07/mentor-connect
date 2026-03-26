@@ -1,23 +1,30 @@
-# websocket/manager.py
-
 from fastapi import WebSocket
 
 class ConnectionManager:
     def __init__(self):
-        self.active_connections = {}  # session_id: [connections]
+        self.active_connections = {}
 
-    async def connect(self, session_id: str, websocket: WebSocket):
+    # ✅ CORRECT ORDER (room, websocket)
+    async def connect(self, room: str, websocket: WebSocket):
         await websocket.accept()
-        if session_id not in self.active_connections:
-            self.active_connections[session_id] = []
-        self.active_connections[session_id].append(websocket)
 
-    def disconnect(self, session_id: str, websocket: WebSocket):
-        self.active_connections[session_id].remove(websocket)
+        if room not in self.active_connections:
+            self.active_connections[room] = []
 
-    async def broadcast(self, session_id: str, message: str):
-        for connection in self.active_connections.get(session_id, []):
-            await connection.send_text(message)
+        self.active_connections[room].append(websocket)
 
+        print(f"✅ Connected to room {room}")
+
+    def disconnect(self, room: str, websocket: WebSocket):
+        if room in self.active_connections:
+            if websocket in self.active_connections[room]:
+                self.active_connections[room].remove(websocket)
+
+        print(f"❌ Disconnected from room {room}")
+
+    async def broadcast(self, room: str, message: str):
+        if room in self.active_connections:
+            for connection in self.active_connections[room]:
+                await connection.send_text(message)
 
 manager = ConnectionManager()
