@@ -1,5 +1,4 @@
 from fastapi import FastAPI, Depends, HTTPException, Header
-from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from passlib.context import CryptContext
 from jose import jwt
@@ -7,11 +6,11 @@ from datetime import datetime, timedelta
 from fastapi.middleware.cors import CORSMiddleware
 
 from database import engine, SessionLocal
-from models import Base, UserDB, Session as SessionModel
+from models import Base, UserDB
 
 # Routers
 from websocket.routes import router as websocket_router
-from invite import router as invite_router
+from routes.session import router as session_router   # ✅ NEW
 
 # Create tables
 Base.metadata.create_all(bind=engine)
@@ -63,23 +62,30 @@ def create_access_token(data: dict):
         "iat": now
     })
 
-    token = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-
-    print("🔥 TOKEN PAYLOAD:", to_encode)
-
-    return token
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 # ---------------- Get Current User ----------------
-def get_current_user(authorization: str = Header(...)):
+def get_current_user(
+    authorization: str = Header(...),
+    db: Session = Depends(get_db)
+):
     try:
         token = authorization.split(" ")[1]
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        return payload
-    except Exception as e:
-        print("❌ Token error:", e)
+
+        user = db.query(UserDB).filter(UserDB.id == payload["user_id"]).first()
+
+        if not user:
+            raise HTTPException(status_code=401, detail="User not found")
+
+        return user
+
+    except Exception:
         raise HTTPException(status_code=401, detail="Invalid token")
 
-# ---------------- Schemas ----------------
+# ---------------- SCHEMAS ----------------
+from pydantic import BaseModel
+
 class User(BaseModel):
     name: str
     email: str
@@ -91,24 +97,24 @@ class LoginData(BaseModel):
     email: str
     password: str
 
-# ---------------- Routes ----------------
+# ---------------- ROUTES ----------------
+
 @app.get("/")
 def home():
-    return {"message": "Backend is running 🚀"}
+    return {"message": "Backend is running"}
 
 # ---------------- REGISTER ----------------
 @app.post("/register")
 def register(user: User, db: Session = Depends(get_db)):
     existing = db.query(UserDB).filter(UserDB.email == user.email).first()
+
     if existing:
         raise HTTPException(status_code=400, detail="User already exists")
-
-    hashed_password = hash_password(user.password)
 
     new_user = UserDB(
         name=user.name,
         email=user.email,
-        password=hashed_password,
+        password=hash_password(user.password),
         role=user.role,
         age=user.age
     )
@@ -130,9 +136,11 @@ def login(data: LoginData, db: Session = Depends(get_db)):
     if not verify_password(data.password, user.password):
         raise HTTPException(status_code=401, detail="Invalid password")
 
+    # ✅ FIX: include name in token
     token = create_access_token({
         "user_id": user.id,
-        "role": user.role
+        "role": user.role,
+        "name": user.name   # 🔥 IMPORTANT FIX
     })
 
     return {
@@ -140,57 +148,6 @@ def login(data: LoginData, db: Session = Depends(get_db)):
         "user_id": user.id,
         "role": user.role
     }
-
-# ---------------- PROTECTED ----------------
-@app.get("/protected")
-def protected(user=Depends(get_current_user)):
-    return {"message": "Authorized", "user": user}
-
-# ---------------- CREATE SESSION ----------------
-@app.post("/sessions/create")
-def create_session(mentor_id: int, student_id: int, db: Session = Depends(get_db)):
-
-    existing = db.query(SessionModel).filter(
-        (SessionModel.student_id == student_id) &
-        (SessionModel.mentor_id == mentor_id)
-    ).first()
-
-    if existing:
-        return {
-            "message": "Session already exists",
-            "session_id": existing.id
-        }
-
-    session = SessionModel(
-        mentor_id=mentor_id,
-        student_id=student_id,
-        status="active"
-    )
-
-    db.add(session)
-    db.commit()
-    db.refresh(session)
-
-    return {"message": "Session created", "session_id": session.id}
-
-# ---------------- END SESSION ----------------
-@app.delete("/session/end/{user_id}")
-def end_session(user_id: int, db: Session = Depends(get_db)):
-
-    session = db.query(SessionModel).filter(
-        (SessionModel.student_id == user_id) |
-        (SessionModel.mentor_id == user_id)
-    ).first()
-
-    if not session:
-        return {"message": "No active session"}
-
-    db.delete(session)
-    db.commit()
-
-    return {"message": "Session ended successfully"}
-
 # ---------------- INCLUDE ROUTERS ----------------
 app.include_router(websocket_router)
-app.include_router(invite_router)
-
+app.include_router(session_router)  

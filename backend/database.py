@@ -4,13 +4,28 @@ from sqlalchemy.orm import sessionmaker
 
 DATABASE_URL = "sqlite:///./test.db"
 
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+# 🔥 UPDATED ENGINE (IMPORTANT)
+engine = create_engine(
+    DATABASE_URL,
+    connect_args={"check_same_thread": False},
 
-SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    # 🔥 FIX CONNECTION POOL ISSUE
+    pool_size=10,        # default 5 → increased
+    max_overflow=20,     # allow extra connections
+    pool_timeout=30,     # wait time
+    pool_recycle=1800    # refresh connections
+)
+
+# ✅ SESSION CONFIG (GOOD)
+SessionLocal = sessionmaker(
+    bind=engine,
+    autoflush=False,
+    autocommit=False
+)
 
 Base = declarative_base()
 
-# ✅ ADD THIS FUNCTION
+# ✅ DB DEPENDENCY
 def get_db():
     db = SessionLocal()
     try:

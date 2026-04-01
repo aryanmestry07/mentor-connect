@@ -1,24 +1,30 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-
 from database import get_db
-from models import Invite, Session as SessionModel
+from models import Invite, Session as SessionModel, UserDB
 from auth import get_current_user
-
 from websocket.manager import manager
 import json
 
 router = APIRouter(prefix="/invite", tags=["Invite"])
 
 
-# 🚀 SEND INVITE (FIXED)
+# 🚀 SEND INVITE
 @router.post("/send")
 async def send_invite(
     receiver_id: int,
     db: Session = Depends(get_db),
-    user=Depends(get_current_user)
+    user: UserDB = Depends(get_current_user)
 ):
-    # 🔥 STEP 1: CREATE SESSION FIRST
+    # 🔥 VALIDATION
+    if user.id == receiver_id:
+        raise HTTPException(status_code=400, detail="Cannot invite yourself")
+
+    receiver = db.query(UserDB).filter(UserDB.id == receiver_id).first()
+    if not receiver:
+        raise HTTPException(status_code=404, detail="Receiver not found")
+
+    # 🔥 CREATE SESSION FIRST
     session = SessionModel(
         mentor_id=user.id,
         student_id=receiver_id,
@@ -28,11 +34,11 @@ async def send_invite(
     db.commit()
     db.refresh(session)
 
-    # 🔥 STEP 2: CREATE INVITE WITH SESSION ID
+    # 🔥 CREATE INVITE WITH SESSION ID
     invite = Invite(
         sender_id=user.id,
         receiver_id=receiver_id,
-        session_id=session.id   # ✅ CRITICAL FIX
+        session_id=session.id
     )
     db.add(invite)
     db.commit()
@@ -40,14 +46,14 @@ async def send_invite(
 
     print("🔥 SESSION CREATED:", session.id)
 
-    # 🔥 STEP 3: NOTIFY RECEIVER (still using user channel)
+    # 🔥 REAL-TIME NOTIFY RECEIVER
     await manager.broadcast(
-        receiver_id,  # ✅ DON'T USE str
+        str(receiver_id),
         json.dumps({
             "type": "invite",
             "sender_id": user.id,
             "invite_id": invite.id,
-            "session_id": session.id   # ✅ IMPORTANT
+            "session_id": session.id
         })
     )
 
@@ -61,17 +67,23 @@ async def send_invite(
 @router.get("/my")
 def get_my_invites(
     db: Session = Depends(get_db),
-    user=Depends(get_current_user)
+    user: UserDB = Depends(get_current_user)
 ):
-    return db.query(Invite).filter(Invite.receiver_id == user.id).all()
+    print("🔥 INVITE API HIT")  # debug
+
+    invites = db.query(Invite).filter(
+        Invite.receiver_id == user.id
+    ).all()
+
+    return invites
 
 
-# 🔥 ACCEPT INVITE (FIXED)
+# 🔥 ACCEPT INVITE
 @router.post("/accept/{invite_id}")
 async def accept_invite(
     invite_id: int,
     db: Session = Depends(get_db),
-    user=Depends(get_current_user)
+    user: UserDB = Depends(get_current_user)
 ):
     invite = db.query(Invite).filter(Invite.id == invite_id).first()
 
@@ -85,14 +97,20 @@ async def accept_invite(
     invite.status = "accepted"
     db.commit()
 
-    # 🔥 USE EXISTING SESSION (NO NEW SESSION)
+    # 🔥 USE SAME SESSION
     session_id = invite.session_id
 
     print("🔥 USING SESSION:", session_id)
 
-    # 🔥 NOTIFY BOTH USERS WITH SAME SESSION
+    # 🔥 ACTIVATE SESSION
+    session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
+    if session:
+        session.status = "active"
+        db.commit()
+
+    # 🔥 NOTIFY BOTH USERS
     await manager.broadcast(
-        invite.sender_id,
+        str(invite.sender_id),
         json.dumps({
             "type": "session_started",
             "session_id": session_id
@@ -100,7 +118,7 @@ async def accept_invite(
     )
 
     await manager.broadcast(
-        invite.receiver_id,
+        str(invite.receiver_id),
         json.dumps({
             "type": "session_started",
             "session_id": session_id
@@ -118,7 +136,7 @@ async def accept_invite(
 def reject_invite(
     invite_id: int,
     db: Session = Depends(get_db),
-    user=Depends(get_current_user)
+    user: UserDB = Depends(get_current_user)
 ):
     invite = db.query(Invite).filter(Invite.id == invite_id).first()
 

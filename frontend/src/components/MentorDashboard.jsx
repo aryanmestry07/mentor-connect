@@ -1,138 +1,142 @@
-import React, { useEffect, useState } from "react";
-import axios from "axios";
+import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import api from "../api";
 
-function MentorDashboard({ user }) {
-  const [invites, setInvites] = useState([]);
+import Navbar from "./Navbar";
+import Sidebar from "./Sidebar";
 
-  const token = localStorage.getItem("token");
+function MentorDashboard({ user, setToken }) {
+  const navigate = useNavigate();
 
-  // 🔹 Fetch Invites
-  const fetchInvites = async () => {
+  const [sessionCodeInput, setSessionCodeInput] = useState("");
+  const [createdLink, setCreatedLink] = useState("");
+
+  // Create session
+  const createSession = async () => {
     try {
-      const res = await axios.get("http://127.0.0.1:8000/invite/my", {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
+      const res = await api.post(`/session/create?user_id=${user.user_id}`);
+      const code = res.data.session_code;
 
-      setInvites(res.data);
+      setCreatedLink(code);
+
+      // Redirect to session
+      navigate(`/session/${code}`);
     } catch (err) {
-      console.error("Error fetching invites:", err);
+      console.error("Create session error:", err);
     }
   };
 
-  useEffect(() => {
-    fetchInvites();
-  }, []);
-
-  // 🔹 Accept Invite
-  const acceptInvite = async (id) => {
-    try {
-      await axios.post(
-        `http://127.0.0.1:8000/invite/accept/${id}`,
-        {},
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
-
-      alert("✅ Invite Accepted");
-      fetchInvites();
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  // 🔹 Reject Invite
-  const rejectInvite = async (id) => {
-    try {
-      await axios.post(
-        `http://127.0.0.1:8000/invite/reject/${id}`,
-        {},
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
-
-      alert("❌ Invite Rejected");
-      fetchInvites();
-    } catch (err) {
-      console.error(err);
-    }
+  // Join session
+  const joinSession = () => {
+    if (!sessionCodeInput.trim()) return;
+    navigate(`/session/${sessionCodeInput}`);
   };
 
   return (
-    <div
-      style={{
-        background: "#1e1e26",
-        color: "#fff",
-        minHeight: "100vh",
-        padding: "20px",
-      }}
-    >
-      <h1>👨‍🏫 Mentor Dashboard</h1>
+    <div style={styles.container}>
+      <Sidebar />
 
-      <h3 style={{ marginTop: "20px" }}>📩 Incoming Invites</h3>
+      <div style={styles.main}>
+        <Navbar user={user} setToken={setToken} />
 
-      {invites.length === 0 ? (
-        <p>No invites yet</p>
-      ) : (
-        invites.map((invite) => (
-          <div
-            key={invite.id}
-            style={{
-              background: "#2d2d3a",
-              padding: "15px",
-              marginTop: "10px",
-              borderRadius: "8px",
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-            }}
-          >
-            <div>
-              <p>From User ID: {invite.sender_id}</p>
-              <p>Status: {invite.status}</p>
-            </div>
+        <div style={styles.content}>
+          <h1 style={styles.title}>Mentor Dashboard</h1>
 
-            <div style={{ display: "flex", gap: "10px" }}>
-              <button
-                onClick={() => acceptInvite(invite.id)}
-                style={{
-                  background: "#4CAF50",
-                  border: "none",
-                  padding: "8px 12px",
-                  color: "#fff",
-                  borderRadius: "5px",
-                  cursor: "pointer",
-                }}
-              >
-                Accept
-              </button>
+          {/* Create Session */}
+          <div style={styles.card}>
+            <h2>Create Session</h2>
+            <button style={styles.primaryBtn} onClick={createSession}>
+              Start Session
+            </button>
 
-              <button
-                onClick={() => rejectInvite(invite.id)}
-                style={{
-                  background: "#ff4d4d",
-                  border: "none",
-                  padding: "8px 12px",
-                  color: "#fff",
-                  borderRadius: "5px",
-                  cursor: "pointer",
-                }}
-              >
-                Reject
+            {createdLink && (
+              <div style={styles.linkBox}>
+                <p>Session Code:</p>
+                <strong>{createdLink}</strong>
+              </div>
+            )}
+          </div>
+
+          {/* Join Session (optional) */}
+          <div style={styles.card}>
+            <h2>Join Session</h2>
+
+            <div style={styles.joinBox}>
+              <input
+                value={sessionCodeInput}
+                onChange={(e) => setSessionCodeInput(e.target.value)}
+                placeholder="Enter session code"
+                style={styles.input}
+              />
+
+              <button style={styles.primaryBtn} onClick={joinSession}>
+                Join
               </button>
             </div>
           </div>
-        ))
-      )}
+        </div>
+      </div>
     </div>
   );
 }
 
 export default MentorDashboard;
+
+const styles = {
+  container: {
+    display: "flex",
+    height: "100vh",
+    background: "#0f172a",
+    color: "white",
+  },
+
+  main: {
+    flex: 1,
+    display: "flex",
+    flexDirection: "column",
+  },
+
+  content: {
+    padding: "30px",
+  },
+
+  title: {
+    marginBottom: "20px",
+  },
+
+  card: {
+    background: "#1e293b",
+    padding: "20px",
+    borderRadius: "10px",
+    marginBottom: "20px",
+  },
+
+  joinBox: {
+    display: "flex",
+    gap: "10px",
+    marginTop: "10px",
+  },
+
+  input: {
+    flex: 1,
+    padding: "10px",
+    background: "#020617",
+    border: "1px solid #334155",
+    color: "white",
+  },
+
+  primaryBtn: {
+    padding: "10px 20px",
+    background: "#2563eb",
+    border: "none",
+    color: "white",
+    cursor: "pointer",
+  },
+
+  linkBox: {
+    marginTop: "10px",
+    padding: "10px",
+    background: "#020617",
+    borderRadius: "6px",
+  },
+};

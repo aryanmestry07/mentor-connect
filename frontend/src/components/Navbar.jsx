@@ -1,68 +1,115 @@
 import React from "react";
+import { useLocation } from "react-router-dom";
 
 function Navbar({ user, setToken }) {
+  const location = useLocation();
 
-// 🔓 Logout (React way 🔥)
-const handleLogout = () => {
-localStorage.removeItem("token");
-sessionStorage.clear();
+  // Logout
+  const handleLogout = () => {
+    localStorage.clear();
+    sessionStorage.clear();
+    setToken(null);
+  };
 
-setToken(null); // 🔥 triggers App re-render
+  // Copy session link
+  const copyLink = () => {
+    const url = window.location.href;
+    navigator.clipboard.writeText(url);
+    alert("Session link copied");
+  };
 
-console.log("👋 Logged out");
+  // Check if inside session page
+  const isSessionPage = location.pathname.includes("/session/");
 
+  return (
+    <div style={styles.navbar}>
+      {/* Left */}
+      <div style={styles.left}>
+        <h2 style={styles.logo}>MentorConnect</h2>
 
-};
+        {isSessionPage && (
+          <button style={styles.copyBtn} onClick={copyLink}>
+            Copy Link
+          </button>
+        )}
+      </div>
 
-return (
-<div
-style={{
-height: "60px",
-backgroundColor: "#1e1e2f",
-color: "#fff",
-display: "flex",
-alignItems: "center",
-justifyContent: "space-between",
-padding: "0 20px",
-boxShadow: "0 2px 5px rgba(0,0,0,0.2)",
-}}
->
-<h2 style={{ margin: 0 }}>MentorConnect 🚀</h2>
+      {/* Right */}
+      <div style={styles.right}>
+        <span style={styles.role}>
+          {user?.role ? user.role.toUpperCase() : "GUEST"}
+        </span>
 
-  <div style={{ display: "flex", alignItems: "center", gap: "15px" }}>
-    
-    {/* 🎯 Role */}
-    <span style={{ fontSize: "14px", opacity: 0.8 }}>
-      Role: {user?.role ? user.role.toUpperCase() : "Guest"}
-    </span>
+        {user?.user_id && (
+          <span style={styles.userId}>ID: {user.user_id}</span>
+        )}
 
-    {/* 🆔 User ID */}
-    {user?.user_id && (
-      <span style={{ fontSize: "12px", opacity: 0.6 }}>
-        ID: {user.user_id}
-      </span>
-    )}
-
-    {/* 🔓 Logout */}
-    <button
-      onClick={handleLogout}
-      style={{
-        padding: "6px 12px",
-        border: "none",
-        borderRadius: "5px",
-        backgroundColor: "#ff4d4d",
-        color: "#fff",
-        cursor: "pointer",
-        fontWeight: "bold",
-      }}
-    >
-      Logout
-    </button>
-  </div>
-</div>
-
-
-);
+        <button style={styles.logoutBtn} onClick={handleLogout}>
+          Logout
+        </button>
+      </div>
+    </div>
+  );
 }
 
 export default Navbar;
+
+const styles = {
+  navbar: {
+    height: "60px",
+    background: "#0f172a",
+    color: "white",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: "0 20px",
+    borderBottom: "1px solid #1e293b",
+  },
+
+  left: {
+    display: "flex",
+    alignItems: "center",
+    gap: "15px",
+  },
+
+  logo: {
+    margin: 0,
+    fontSize: "18px",
+    fontWeight: "600",
+  },
+
+  copyBtn: {
+    padding: "6px 12px",
+    background: "#2563eb",
+    border: "none",
+    color: "white",
+    cursor: "pointer",
+    borderRadius: "6px",
+  },
+
+  right: {
+    display: "flex",
+    alignItems: "center",
+    gap: "15px",
+  },
+
+  role: {
+    fontSize: "13px",
+    opacity: 0.8,
+  },
+
+  userId: {
+    fontSize: "12px",
+    opacity: 0.6,
+  },
+
+  logoutBtn: {
+    padding: "6px 12px",
+    background: "#ef4444",
+    border: "none",
+    borderRadius: "6px",
+    color: "white",
+    cursor: "pointer",
+    fontWeight: "500",
+  },
+};
