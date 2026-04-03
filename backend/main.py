@@ -10,7 +10,8 @@ from models import Base, UserDB
 
 # Routers
 from websocket.routes import router as websocket_router
-from routes.session import router as session_router   # ✅ NEW
+from routes.session import router as session_router
+from routes.code_runner import router as code_runner_router  # ✅ NEW
 
 # Create tables
 Base.metadata.create_all(bind=engine)
@@ -136,11 +137,10 @@ def login(data: LoginData, db: Session = Depends(get_db)):
     if not verify_password(data.password, user.password):
         raise HTTPException(status_code=401, detail="Invalid password")
 
-    # ✅ FIX: include name in token
     token = create_access_token({
         "user_id": user.id,
         "role": user.role,
-        "name": user.name   # 🔥 IMPORTANT FIX
+        "name": user.name
     })
 
     return {
@@ -148,6 +148,8 @@ def login(data: LoginData, db: Session = Depends(get_db)):
         "user_id": user.id,
         "role": user.role
     }
+
 # ---------------- INCLUDE ROUTERS ----------------
 app.include_router(websocket_router)
-app.include_router(session_router)  
+app.include_router(session_router)
+app.include_router(code_runner_router)  

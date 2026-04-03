@@ -1,63 +1,101 @@
-import React, { useState, useMemo } from "react";
-import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
+import React, { useState, useMemo, useEffect } from "react";
+import { BrowserRouter as Router, Routes, Route, Link, Navigate } from "react-router-dom";
 
+// Components
 import Login from "./components/Login";
 import MentorDashboard from "./components/MentorDashboard";
 import StudentDashboard from "./components/StudentDashboard";
 import SessionPage from "./components/SessionPage";
+import PremiumCursor from "./components/PremiumCursor"; // ✅ ADD THIS
 
 function App() {
   const [token, setToken] = useState(() => localStorage.getItem("token"));
 
-  // Decode user
+  // ✅ Decode user
   const user = useMemo(() => {
     if (!token) return null;
-
     try {
-      return JSON.parse(atob(token.split(".")[1]));
+      const payload = JSON.parse(atob(token.split(".")[1]));
+      if (!payload.exp || Date.now() >= payload.exp * 1000) {
+        throw new Error("Token expired");
+      }
+      return payload;
     } catch (err) {
-      console.error("Invalid token",err);
-      localStorage.removeItem("token");
+      console.error("Auth Error:", err.message);
       return null;
     }
   }, [token]);
 
-  // Login
+  // ✅ Logout if invalid
+  useEffect(() => {
+    if (token && !user) {
+      handleLogout();
+    }
+  }, [token, user]);
+
   const handleLogin = (newToken) => {
     localStorage.setItem("token", newToken);
     setToken(newToken);
   };
 
+  const handleLogout = () => {
+    localStorage.removeItem("token");
+    setToken(null);
+  };
 
-  if (!token) {
-    return <Login onLogin={handleLogin} />;
-  }
+  // 🔒 Auth guard
+  if (!token) return <Login onLogin={handleLogin} />;
 
-  if (!user) {
-    return <div>Loading...</div>;
-  }
+  if (!user)
+    return (
+      <div className="flex h-screen items-center justify-center bg-slate-900">
+        <p className="text-white">Loading...</p>
+      </div>
+    );
 
   return (
     <Router>
-      <Routes>
-        {/* Dashboard */}
-        <Route
-          path="/"
-          element={
-            user.role === "mentor" ? (
-              <MentorDashboard user={user} setToken={setToken} />
-            ) : (
-              <StudentDashboard user={user} setToken={setToken} />
-            )
-          }
-        />
+      <div className="min-h-screen bg-slate-50">
+        
+        {/* NAVBAR */}
+        <nav className="border-b bg-white p-4 flex justify-between">
+          <Link to="/">MentorConnect</Link>
+          <button onClick={handleLogout}>Logout</button>
+        </nav>
 
-        {/* Session Page */}
-        <Route
-          path="/session/:sessionCode"
-          element={<SessionPage role={user.role} />}
-        />
-      </Routes>
+        <main className="p-4">
+          <Routes>
+
+            {/* HOME */}
+            <Route
+              path="/"
+              element={
+                user.role === "mentor" ? (
+                  <MentorDashboard user={user} />
+                ) : (
+                  <StudentDashboard user={user} />
+                )
+              }
+            />
+
+            {/* SESSION */}
+            <Route
+              path="/session/:sessionCode"
+              element={
+                <SessionPage
+                  role={user.role}
+                  user={user}
+                />
+              }
+            />
+
+
+            {/* FALLBACK */}
+            <Route path="*" element={<Navigate to="/" />} />
+
+          </Routes>
+        </main>
+      </div>
     </Router>
   );
 }

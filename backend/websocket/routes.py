@@ -5,22 +5,29 @@ from datetime import datetime
 
 router = APIRouter()
 
-# STORE LATEST CODE PER SESSION
 session_code_store = {}
-
+chat_store = {}
 
 @router.websocket("/ws/session/{session_code}")
 async def websocket_endpoint(websocket: WebSocket, session_code: str):
 
+    # ✅ Normalize room
+    session_code = session_code.lower()
+
     await manager.connect(session_code, websocket)
     print(f"Connected to session {session_code}")
 
-    # Send existing code
+    # ✅ Send existing code
     if session_code in session_code_store:
         await websocket.send_text(json.dumps({
-            "type": "editor",
+            "type": "code_update",
             "code": session_code_store[session_code]
         }))
+
+    # ✅ Send existing chat
+    if session_code in chat_store:
+        for msg in chat_store[session_code]:
+            await websocket.send_text(json.dumps(msg))
 
     try:
         while True:
@@ -33,63 +40,90 @@ async def websocket_endpoint(websocket: WebSocket, session_code: str):
 
             message_type = parsed_data.get("type")
 
-            # CHAT
+            # 💬 CHAT
             if message_type == "chat":
-                message = parsed_data.get("message")
-                sender = parsed_data.get("sender", "User")
-
                 payload = {
                     "type": "chat",
-                    "message": message,
-                    "sender": sender,
+                    "message": parsed_data.get("message"),
+                    "sender": parsed_data.get("sender", "User"),
                     "time": datetime.utcnow().strftime("%H:%M")
                 }
 
-                await manager.broadcast(session_code, json.dumps(payload))
+                chat_store.setdefault(session_code, []).append(payload)
 
-            # CODE EDITOR
-            elif message_type == "editor":
+                await manager.broadcast(session_code, payload)
+
+            # 💻 CODE (🔥 FIXED HERE)
+            elif message_type == "code_update":
                 code = parsed_data.get("code")
+                language = parsed_data.get("language")
+                sender = parsed_data.get("sender", "User")  # ✅ FIX
 
                 session_code_store[session_code] = code
 
-                await manager.broadcast(session_code, json.dumps({
-                    "type": "editor",
+                await manager.broadcast(session_code, {
+                    "type": "code_update",
                     "code": code,
-                }))
+                    "language": language,
+                    "sender": sender  # 🔥 IMPORTANT
+                })
 
-            # VIDEO SIGNALING
-            elif message_type in ["offer", "answer", "ice"]:
-                await manager.broadcast(session_code, json.dumps({
+            # 👤 CURSOR
+            elif message_type == "cursor":
+                await manager.broadcast(session_code, {
+                    "type": "cursor",
+                    "lineNumber": parsed_data.get("lineNumber"),
+                    "column": parsed_data.get("column"),
+                    "user": parsed_data.get("user")
+                })
+
+            # 🎥 WEBRTC
+            elif message_type in ["offer", "answer", "ice-candidate"]:
+                await manager.broadcast(session_code, {
                     "type": message_type,
                     "data": parsed_data.get("data")
-                }))
+                })
 
-            # USER JOIN
+            # 📞 CALL
+            elif message_type == "call_request":
+                await manager.broadcast(session_code, {
+                    "type": "call_request",
+                    "caller": parsed_data.get("caller", "User")
+                })
+
+            elif message_type == "call_accept":
+                await manager.broadcast(session_code, {
+                    "type": "call_accept"
+                })
+
+            elif message_type == "call_reject":
+                await manager.broadcast(session_code, {
+                    "type": "call_reject"
+                })
+
+            # 👤 JOIN
             elif message_type == "join":
-                await manager.broadcast(session_code, json.dumps({
+                await manager.broadcast(session_code, {
                     "type": "system",
-                    "message": "User joined session"
-                }))
+                    "message": f"{parsed_data.get('sender', 'User')} joined session"
+                })
 
-            # SESSION END
+            # ❌ END SESSION
             elif message_type == "session_end":
-                await manager.broadcast(session_code, json.dumps({
+                await manager.broadcast(session_code, {
                     "type": "session_end",
-                    "message": "Session ended by host"
-                }))
+                    "message": "Session ended"
+                })
 
-                await manager.close_room(session_code)
                 session_code_store.pop(session_code, None)
+                chat_store.pop(session_code, None)
 
-                print(f"Session {session_code} ended")
                 break
 
     except WebSocketDisconnect:
         manager.disconnect(session_code, websocket)
-        print(f"Disconnected from session {session_code}")
 
-        # Cleanup if empty
         if session_code in manager.active_connections:
             if not manager.active_connections[session_code]:
                 session_code_store.pop(session_code, None)
+                chat_store.pop(session_code, None)

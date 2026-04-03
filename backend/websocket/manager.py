@@ -1,8 +1,10 @@
 from fastapi import WebSocket
+import json
+
 
 class ConnectionManager:
     def __init__(self):
-        # 🔥 NOW USING STRING session_code
+        # room_id -> list of websockets
         self.active_connections: dict[str, list[WebSocket]] = {}
 
     # 🔗 CONNECT
@@ -25,26 +27,26 @@ class ConnectionManager:
             if websocket in self.active_connections[room]:
                 self.active_connections[room].remove(websocket)
 
-            # 🔥 Remove empty room
+            # Clean empty rooms
             if not self.active_connections[room]:
                 del self.active_connections[room]
 
         print(f"❌ Disconnected from room {room}")
-        print("📊 ACTIVE ROOMS:", {
-            k: len(v) for k, v in self.active_connections.items()
-        })
 
-    # 📡 BROADCAST
-    async def broadcast(self, room: str, message: str):
+    # 📡 BROADCAST (SAFE JSON VERSION)
+    async def broadcast(self, room: str, message):
         if room not in self.active_connections:
-            print(f"⚠️ No active connections in room {room}")
             return
 
-        print(f"📡 Broadcasting to room {room} ({len(self.active_connections[room])} users)")
+        # ✅ Convert dict → JSON string (IMPORTANT FIX)
+        if isinstance(message, dict):
+            message = json.dumps(message)
+
+        print(f"📡 Broadcasting to {len(self.active_connections[room])} users")
 
         dead_connections = []
 
-        for connection in self.active_connections[room]:
+        for connection in list(self.active_connections[room]):
             try:
                 await connection.send_text(message)
             except Exception:
@@ -54,23 +56,6 @@ class ConnectionManager:
         for conn in dead_connections:
             self.disconnect(room, conn)
 
-    # 🔴 CLOSE ENTIRE ROOM (NEW 🔥)
-    async def close_room(self, room: str):
-        if room not in self.active_connections:
-            return
 
-        print(f"🛑 Closing room {room}")
-
-        for connection in self.active_connections[room]:
-            try:
-                await connection.close()
-            except Exception:
-                pass
-
-        # 🔥 REMOVE ROOM COMPLETELY
-        del self.active_connections[room]
-
-        print(f"✅ Room {room} closed successfully")
-
-
+# ✅ SINGLETON INSTANCE
 manager = ConnectionManager()

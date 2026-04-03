@@ -3,13 +3,19 @@ import React, { useState } from "react";
 function ChatInput({ message, setMessage, sendMessage }) {
   const [sending, setSending] = useState(false);
 
-  const handleSend = () => {
+  const handleSend = async () => {
     if (!message.trim() || sending) return;
 
     setSending(true);
-    sendMessage();
 
-    setTimeout(() => setSending(false), 150);
+    const success = sendMessage();
+
+    if (success) {
+      setMessage("");
+    }
+
+    // slight delay to prevent spam clicking
+    setTimeout(() => setSending(false), 200);
   };
 
   return (

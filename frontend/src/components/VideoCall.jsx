@@ -1,9 +1,17 @@
 import React, { useState } from "react";
 
-function VideoCall({ localVideoRef, remoteVideoRef, startCall }) {
+function VideoCall({
+  localVideoRef,
+  remoteVideoRef,
+  sendCallRequest,
+  callAccepted,
+  acceptCall,
+  rejectCall,
+}) {
   const [isMuted, setIsMuted] = useState(false);
   const [cameraOff, setCameraOff] = useState(false);
 
+  // 🎤 MUTE / UNMUTE
   const toggleMute = () => {
     const stream = localVideoRef.current?.srcObject;
     if (!stream) return;
@@ -15,6 +23,7 @@ function VideoCall({ localVideoRef, remoteVideoRef, startCall }) {
     setIsMuted(!isMuted);
   };
 
+  // 🎥 CAMERA ON/OFF
   const toggleCamera = () => {
     const stream = localVideoRef.current?.srcObject;
     if (!stream) return;
@@ -26,104 +35,95 @@ function VideoCall({ localVideoRef, remoteVideoRef, startCall }) {
     setCameraOff(!cameraOff);
   };
 
-  return (
-    <div style={styles.container}>
-      <h3 style={styles.title}>Video Call</h3>
+  // 📞 START CALL
+  const handleStart = () => {
+    sendCallRequest();
+    acceptCall(); // auto connect both users
+  };
 
-      {/* Video Area */}
-      <div style={styles.videoWrapper}>
-        {/* Remote Video (Main) */}
+  // ❌ END CALL
+  const handleEnd = () => {
+    rejectCall();
+
+    const stream = localVideoRef.current?.srcObject;
+    if (stream) {
+      stream.getTracks().forEach((track) => track.stop());
+    }
+
+    setIsMuted(false);
+    setCameraOff(false);
+  };
+
+  return (
+    <div className="flex flex-col rounded-2xl bg-slate-900 border border-slate-800 overflow-hidden">
+
+      {/* 🎥 VIDEO AREA */}
+      <div className="relative aspect-video bg-black">
+
+        {/* Remote Video */}
         <video
           ref={remoteVideoRef}
           autoPlay
           playsInline
-          style={styles.remoteVideo}
+          className="w-full h-full object-cover"
         />
 
-        {/* Local Video (Small Overlay) */}
-        <video
-          ref={localVideoRef}
-          autoPlay
-          muted
-          playsInline
-          style={styles.localVideo}
-        />
+        {/* Local Video */}
+        <div className="absolute bottom-3 right-3 w-32 h-24 border rounded-lg overflow-hidden">
+          <video
+            ref={localVideoRef}
+            autoPlay
+            muted
+            playsInline
+            className="w-full h-full object-cover"
+          />
+        </div>
       </div>
 
-      {/* Controls */}
-      <div style={styles.controls}>
-        <button style={styles.btn} onClick={startCall}>
-          Start
-        </button>
+      {/* 🎮 CONTROLS */}
+      <div className="flex justify-center gap-4 p-3 bg-slate-800">
 
-        <button style={styles.btn} onClick={toggleMute}>
-          {isMuted ? "Unmute" : "Mute"}
-        </button>
+        {!callAccepted ? (
+          <button
+            onClick={handleStart}
+            className="px-6 py-2 bg-green-600 text-white rounded-lg"
+          >
+            Start Call
+          </button>
+        ) : (
+          <>
+            {/* 🎤 MUTE */}
+            <button
+              onClick={toggleMute}
+              className={`px-3 py-2 rounded ${
+                isMuted ? "bg-red-500" : "bg-slate-700"
+              }`}
+            >
+              🎤
+            </button>
 
-        <button style={styles.btn} onClick={toggleCamera}>
-          {cameraOff ? "Camera On" : "Camera Off"}
-        </button>
+            {/* 🎥 CAMERA */}
+            <button
+              onClick={toggleCamera}
+              className={`px-3 py-2 rounded ${
+                cameraOff ? "bg-red-500" : "bg-slate-700"
+              }`}
+            >
+              🎥
+            </button>
+
+            {/* ❌ END */}
+            <button
+              onClick={handleEnd}
+              className="px-4 py-2 bg-red-600 text-white rounded"
+            >
+              End
+            </button>
+          </>
+        )}
       </div>
     </div>
   );
 }
 
 export default VideoCall;
-
-const styles = {
-  container: {
-    background: "#1e293b",
-    padding: "10px",
-    borderRadius: "10px",
-    display: "flex",
-    flexDirection: "column",
-    gap: "10px",
-  },
-
-  title: {
-    margin: 0,
-    fontSize: "14px",
-  },
-
-  videoWrapper: {
-    position: "relative",
-    width: "100%",
-    height: "200px",
-    background: "#020617",
-    borderRadius: "8px",
-    overflow: "hidden",
-  },
-
-  remoteVideo: {
-    width: "100%",
-    height: "100%",
-    objectFit: "cover",
-  },
-
-  localVideo: {
-    position: "absolute",
-    bottom: "10px",
-    right: "10px",
-    width: "80px",
-    height: "60px",
-    borderRadius: "6px",
-    background: "#000",
-    objectFit: "cover",
-  },
-
-  controls: {
-    display: "flex",
-    justifyContent: "space-between",
-    gap: "5px",
-  },
-
-  btn: {
-    flex: 1,
-    padding: "8px",
-    background: "#2563eb",
-    border: "none",
-    color: "white",
-    borderRadius: "6px",
-    cursor: "pointer",
-  },
-};

@@ -1,90 +1,219 @@
 import React, { useEffect, useState, useRef } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams } from "react-router-dom";
+import CodeEditor from "./CodeEditor";
+import VideoCall from "./VideoCall";
+import Navbar from "./Navbar";
+import ChatBox from "./ChatBox";
+import ChatInput from "./ChatInput";
 
-const SessionPage = ({ role }) => {
+const SessionPage = ({ user }) => {
   const { sessionCode } = useParams();
-  const navigate = useNavigate();
+
+  const currentUser =
+    user?.name || localStorage.getItem("name") || "User";
 
   const socketRef = useRef(null);
-  const chatEndRef = useRef(null);
+  const localVideoRef = useRef(null);
+  const remoteVideoRef = useRef(null);
+  const peerConnection = useRef(null);
 
-  // ✅ FIX: always fallback properly
-  const currentUser = localStorage.getItem("name") || "User";
+  const [callIncoming, setCallIncoming] = useState(false);
+  const [callAccepted, setCallAccepted] = useState(false);
 
-  const [messages, setMessages] = useState(() => {
-    const saved = localStorage.getItem(`chat_${sessionCode}`);
-    return saved ? JSON.parse(saved) : [];
-  });
-
+  const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
-  const [code, setCode] = useState("// Start coding...");
+  const [code, setCode] = useState("");
   const [sessionEnded, setSessionEnded] = useState(false);
 
-  // Save chat
-  useEffect(() => {
-    localStorage.setItem(`chat_${sessionCode}`, JSON.stringify(messages));
-  }, [messages, sessionCode]);
+  const [remoteCursors, setRemoteCursors] = useState([]);
 
-  // Auto scroll
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  // 🎥 WEBRTC
+  const setupWebRTC = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: true,
+      });
 
-  // Join session
-  useEffect(() => {
-    const joinSession = async () => {
-      try {
-        const res = await fetch("http://localhost:8000/session/join", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ session_code: sessionCode }),
-        });
-
-        if (!res.ok) {
-          alert("Session not found or ended");
-          navigate("/");
-        }
-      } catch (err) {
-        console.error(err);
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = stream;
       }
-    };
 
-    joinSession();
-  }, [sessionCode, navigate]);
+      peerConnection.current = new RTCPeerConnection({
+        iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+      });
 
-  // WebSocket
+      stream.getTracks().forEach((track) => {
+        peerConnection.current.addTrack(track, stream);
+      });
+
+      peerConnection.current.ontrack = (e) => {
+        if (remoteVideoRef.current) {
+          remoteVideoRef.current.srcObject = e.streams[0];
+        }
+      };
+
+      peerConnection.current.onicecandidate = (e) => {
+        if (e.candidate && socketRef.current?.readyState === 1) {
+          socketRef.current.send(
+            JSON.stringify({
+              type: "ice-candidate",
+              data: e.candidate,
+            })
+          );
+        }
+      };
+    } catch (err) {
+      console.error("WebRTC error:", err);
+    }
+  };
+
+  const startCall = async () => {
+    if (!peerConnection.current) return;
+
+    const offer = await peerConnection.current.createOffer();
+    await peerConnection.current.setLocalDescription(offer);
+
+    socketRef.current?.send(
+      JSON.stringify({
+        type: "offer",
+        data: offer,
+      })
+    );
+  };
+
+  const sendCallRequest = () => {
+    socketRef.current?.send(
+      JSON.stringify({
+        type: "call_request",
+        caller: currentUser,
+      })
+    );
+  };
+
+  const acceptCall = async () => {
+    setCallIncoming(false);
+    setCallAccepted(true);
+
+    socketRef.current?.send(JSON.stringify({ type: "call_accept" }));
+
+    await setupWebRTC();
+    setTimeout(startCall, 500);
+  };
+
+  const rejectCall = () => {
+    setCallIncoming(false);
+    socketRef.current?.send(JSON.stringify({ type: "call_reject" }));
+  };
+
+  // ✅ CURSOR
+  const sendCursor = (cursor) => {
+    socketRef.current?.send(
+      JSON.stringify({
+        type: "cursor",
+        ...cursor,
+        user: currentUser,
+      })
+    );
+  };
+
+  // 🌐 SOCKET
   useEffect(() => {
+    if (socketRef.current) return;
+
     const socket = new WebSocket(
       `ws://localhost:8000/ws/session/${sessionCode}`
     );
 
-    socket.onopen = () => {
-      socket.send(JSON.stringify({ type: "join" }));
+    socket.onopen = async () => {
+      socket.send(
+        JSON.stringify({
+          type: "join",
+          sender: currentUser,
+        })
+      );
+
+      await setupWebRTC();
     };
 
-    socket.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-
-      if (data.type === "chat") {
-        if (!data.message) return;
-
-        setMessages((prev) => [
-          ...prev,
-          {
-            sender: data.sender || "User",  // ✅ FIX
-            message: data.message,
-            time: data.time || "",          // ✅ USE BACKEND TIME ONLY
-          },
-        ]);
+    socket.onmessage = async (event) => {
+      let data;
+      try {
+        data = JSON.parse(event.data);
+      } catch {
+        return;
       }
 
-      if (data.type === "editor") {
-        setCode(data.code);
-      }
+      switch (data.type) {
+        case "chat":
+          setMessages((prev) => [
+            ...prev,
+            {
+              sender: data.sender,
+              message: data.message,
+              time: data.time,
+            },
+          ]);
+          break;
 
-      if (data.type === "session_end") {
-        setSessionEnded(true);
-        socket.close();
+        case "code_update":
+          window.dispatchEvent(
+            new CustomEvent("code_update", {
+              detail: data,
+            })
+          );
+          break;
+
+        case "cursor":
+          if (!data.user || data.user === currentUser) return;
+
+          setRemoteCursors((prev) => {
+            const others = prev.filter((c) => c.user !== data.user);
+            return [...others, data];
+          });
+          break;
+
+        case "call_request":
+          setCallIncoming(true);
+          break;
+
+        case "call_accept":
+          setCallAccepted(true);
+          break;
+
+        case "call_reject":
+          setCallIncoming(false);
+          break;
+
+        case "offer": {
+          await peerConnection.current.setRemoteDescription(data.data);
+
+          const answer = await peerConnection.current.createAnswer();
+          await peerConnection.current.setLocalDescription(answer);
+
+          socket.send(
+            JSON.stringify({
+              type: "answer",
+              data: answer,
+            })
+          );
+          break;
+        }
+
+        case "answer":
+          await peerConnection.current.setRemoteDescription(data.data);
+          break;
+
+        case "ice-candidate":
+          await peerConnection.current.addIceCandidate(data.data);
+          break;
+
+        case "session_end":
+          setSessionEnded(true);
+          break;
+
+        default:
+          break;
       }
     };
 
@@ -93,11 +222,11 @@ const SessionPage = ({ role }) => {
     return () => socket.close();
   }, [sessionCode]);
 
-  // Send chat (no duplicate)
+  // 💬 SEND MESSAGE
   const sendMessage = () => {
-    if (!input.trim() || !socketRef.current) return;
+    if (!input.trim()) return false;
 
-    socketRef.current.send(
+    socketRef.current?.send(
       JSON.stringify({
         type: "chat",
         message: input,
@@ -105,126 +234,59 @@ const SessionPage = ({ role }) => {
       })
     );
 
-    setInput("");
+    return true;
   };
 
-  // Code editor
-  const handleCodeChange = (e) => {
-    const newCode = e.target.value;
-    setCode(newCode);
+  // 💻 SEND CODE
+  const sendCode = (payload) => {
+    setCode(payload.code);
 
     socketRef.current?.send(
       JSON.stringify({
-        type: "editor",
-        code: newCode,
+        type: "code_update",
+        ...payload,
+        sender: currentUser,
       })
     );
   };
 
-  // End session
-  const endSession = async () => {
-    try {
-      await fetch(
-        `http://localhost:8000/session/end?user_id=${localStorage.getItem(
-          "user_id"
-        )}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ session_code: sessionCode }),
-        }
-      );
-
-      socketRef.current?.send(JSON.stringify({ type: "session_end" }));
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  // Session ended UI
-  if (sessionEnded) {
-    return (
-      <div style={styles.centerScreen}>
-        <h1>Session Ended</h1>
-        <button style={styles.primaryBtn} onClick={() => navigate("/")}>
-          Go Back
-        </button>
-      </div>
-    );
-  }
+  if (sessionEnded) return <h1>Session Ended</h1>;
 
   return (
-    <div style={styles.container}>
-      <div style={styles.topBar}>
-        <div>Session: {sessionCode}</div>
+    <div className="h-screen flex flex-col bg-slate-900 text-white">
+      <Navbar user={user} />
 
-        {role === "mentor" && (
-          <button style={styles.endBtn} onClick={endSession}>
-            End Session
-          </button>
-        )}
-      </div>
-
-      <div style={styles.main}>
-        <div style={styles.leftPanel}>
-          <div style={styles.videoBox}>
-            <p>Video Area</p>
-          </div>
-
-          <div style={styles.editorBox}>
-            <textarea
-              value={code}
-              onChange={handleCodeChange}
-              style={styles.textarea}
-            />
-          </div>
+      <div className="flex flex-1 gap-4 p-4">
+        <div className="flex-1 bg-slate-800 rounded-2xl">
+          <CodeEditor
+            code={code}
+            sendCode={sendCode}
+            sendCursor={sendCursor}
+            remoteCursors={remoteCursors}
+          />
         </div>
 
-        <div style={styles.chatPanel}>
-          <div style={styles.chatHeader}>Chat</div>
-
-          <div style={styles.chatMessages}>
-            {messages.map((msg, i) => {
-              const sender = msg.sender || "User";
-              const isMe = sender === currentUser;
-
-              return (
-                <div
-                  key={`${sender}-${i}`} // ✅ FIXED KEY
-                  style={{
-                    display: "flex",
-                    justifyContent: isMe ? "flex-end" : "flex-start",
-                  }}
-                >
-                  <div
-                    style={{
-                      ...styles.chatBubble,
-                      background: isMe ? "#2563eb" : "#1e293b",
-                    }}
-                  >
-                    {!isMe && (
-                      <div style={styles.sender}>{sender}</div>
-                    )}
-                    <div>{msg.message}</div>
-                    <div style={styles.time}>{msg.time}</div>
-                  </div>
-                </div>
-              );
-            })}
-
-            <div ref={chatEndRef} />
+        <div className="w-[380px] flex flex-col gap-4">
+          <div className="bg-slate-800 rounded-2xl p-3">
+            <VideoCall
+              localVideoRef={localVideoRef}
+              remoteVideoRef={remoteVideoRef}
+              sendCallRequest={sendCallRequest}
+              callAccepted={callAccepted}
+              callIncoming={callIncoming}
+              acceptCall={acceptCall}
+              rejectCall={rejectCall}
+            />
           </div>
 
-          <div style={styles.chatInputArea}>
-            <input
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              style={styles.input}
-              placeholder="Type a message..."
+          <div className="flex-1 bg-slate-800 rounded-2xl flex flex-col overflow-hidden">
+            <ChatBox chat={messages} currentUser={currentUser} />
+
+            <ChatInput
+              message={input}
+              setMessage={setInput}
+              sendMessage={sendMessage}
             />
-            <button style={styles.sendBtn} onClick={sendMessage}>
-              Send
-            </button>
           </div>
         </div>
       </div>
@@ -233,146 +295,3 @@ const SessionPage = ({ role }) => {
 };
 
 export default SessionPage;
-
-
-
-const styles = {
-  container: {
-    height: "100vh",
-    display: "flex",
-    flexDirection: "column",
-    background: "#0f172a",
-    color: "white",
-  },
-
-  topBar: {
-    height: "60px",
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    padding: "0 20px",
-    background: "#1e293b",
-  },
-
-  main: {
-    flex: 1,
-    display: "flex",
-  },
-
-  leftPanel: {
-    flex: 3,
-    display: "flex",
-    flexDirection: "column",
-    padding: "10px",
-    gap: "10px",
-  },
-
-  videoBox: {
-    flex: 1,
-    background: "#1e293b",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: "10px",
-  },
-
-  editorBox: {
-    flex: 1,
-    background: "#1e293b",
-    borderRadius: "10px",
-    padding: "10px",
-  },
-
-  textarea: {
-    width: "100%",
-    height: "100%",
-    background: "#020617",
-    color: "white",
-    border: "none",
-    outline: "none",
-  },
-
-  chatPanel: {
-    flex: 1,
-    display: "flex",
-    flexDirection: "column",
-    background: "#020617",
-    borderLeft: "1px solid #334155",
-  },
-
-  chatHeader: {
-    padding: "10px",
-    borderBottom: "1px solid #334155",
-  },
-
-  chatMessages: {
-    flex: 1,
-    overflowY: "auto",
-    padding: "10px",
-  },
-
-  chatBubble: {
-    maxWidth: "70%",
-    padding: "10px",
-    borderRadius: "10px",
-    marginBottom: "8px",
-  },
-
-  sender: {
-    fontSize: "12px",
-    color: "#38bdf8",
-  },
-
-  time: {
-    fontSize: "10px",
-    opacity: 0.6,
-    marginTop: "4px",
-    textAlign: "right",
-  },
-
-  chatInputArea: {
-    display: "flex",
-    borderTop: "1px solid #334155",
-  },
-
-  input: {
-    flex: 1,
-    padding: "10px",
-    background: "#020617",
-    border: "none",
-    color: "white",
-  },
-
-  sendBtn: {
-    padding: "10px 15px",
-    background: "#2563eb",
-    border: "none",
-    color: "white",
-    cursor: "pointer",
-  },
-
-  endBtn: {
-    background: "red",
-    padding: "8px 15px",
-    border: "none",
-    color: "white",
-    cursor: "pointer",
-  },
-
-  centerScreen: {
-    height: "100vh",
-    display: "flex",
-    justifyContent: "center",
-    alignItems: "center",
-    flexDirection: "column",
-  },
-
-  primaryBtn: {
-    marginTop: "10px",
-    padding: "10px 20px",
-    background: "#2563eb",
-    border: "none",
-    color: "white",
-    cursor: "pointer",
-  },
-};
